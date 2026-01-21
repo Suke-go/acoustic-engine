@@ -1,6 +1,6 @@
 """
-Acoustic Engine - GUI Perceptual Parameter Editor with Waveform Visualization
-Uses tkinter for GUI, matplotlib for waveform display, and acoustic_engine.dll for processing.
+Acoustic Engine - GUI Perceptual Parameter Editor with Scenario Presets
+Uses the ae_wrapper module for clean DLL access.
 
 Usage:
   python perceptual_editor_gui.py
@@ -9,15 +9,18 @@ Requirements:
   pip install sounddevice numpy pydub matplotlib
 """
 
-import ctypes
 import os
 import sys
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from ctypes import (
-    c_float, c_int, c_uint32, c_uint8, c_size_t, c_char_p, c_void_p, c_bool,
-    Structure, POINTER, byref
+
+# Add parent directory to path for bindings import
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from bindings import (
+    AcousticEngine, Scenario, MainParams,
+    SCENARIO_INFO, get_scenarios_by_category
 )
 
 # Try to import audio/visualization libraries
@@ -27,14 +30,13 @@ try:
     AUDIO_AVAILABLE = True
 except ImportError:
     AUDIO_AVAILABLE = False
-    print("Warning: sounddevice/numpy not available. Audio playback disabled.")
+    print("Warning: sounddevice/numpy not available.")
 
 try:
     from pydub import AudioSegment
     PYDUB_AVAILABLE = True
 except ImportError:
     PYDUB_AVAILABLE = False
-    print("Warning: pydub not available. MP3 loading disabled.")
 
 try:
     import matplotlib
@@ -44,71 +46,8 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
-    print("Warning: matplotlib not available. Waveform display disabled.")
 
-# Find the DLL
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DLL_PATH = os.path.join(SCRIPT_DIR, "build", "Release", "acoustic_engine.dll")
-
-if not os.path.exists(DLL_PATH):
-    print(f"Error: DLL not found at {DLL_PATH}")
-    sys.exit(1)
-
-# Load DLL
-ae = ctypes.CDLL(DLL_PATH)
-
-# ============================================================================
-# Structure definitions
-# ============================================================================
-
-class ae_config_t(Structure):
-    _fields_ = [
-        ("sample_rate", c_uint32),
-        ("max_buffer_size", c_uint32),
-        ("data_path", c_char_p),
-        ("hrtf_path", c_char_p),
-        ("preload_hrtf", c_bool),
-        ("preload_all_presets", c_bool),
-        ("max_reverb_time_sec", c_size_t),
-    ]
-
-class ae_main_params_t(Structure):
-    _fields_ = [
-        ("distance", c_float),
-        ("room_size", c_float),
-        ("brightness", c_float),
-        ("width", c_float),
-        ("dry_wet", c_float),
-        ("intensity", c_float),
-    ]
-
-# ============================================================================
-# Function prototypes
-# ============================================================================
-
-ae.ae_get_version_string.restype = c_char_p
-ae.ae_get_version_string.argtypes = []
-
-ae.ae_get_default_config.restype = ae_config_t
-ae.ae_get_default_config.argtypes = []
-
-ae.ae_create_engine.restype = c_void_p
-ae.ae_create_engine.argtypes = [POINTER(ae_config_t)]
-
-ae.ae_destroy_engine.restype = None
-ae.ae_destroy_engine.argtypes = [c_void_p]
-
-ae.ae_get_main_params.restype = c_int
-ae.ae_get_main_params.argtypes = [c_void_p, POINTER(ae_main_params_t)]
-
-ae.ae_set_perceived_distance.restype = c_int
-ae.ae_set_perceived_distance.argtypes = [c_void_p, c_float]
-
-ae.ae_set_perceived_spaciousness.restype = c_int
-ae.ae_set_perceived_spaciousness.argtypes = [c_void_p, c_float]
-
-ae.ae_set_perceived_clarity.restype = c_int
-ae.ae_set_perceived_clarity.argtypes = [c_void_p, c_float]
 
 # ============================================================================
 # GUI Application
@@ -118,22 +57,25 @@ class PerceptualEditorGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Acoustic Engine - Perceptual Editor")
-        self.root.geometry("700x750")
+        self.root.geometry("750x800")
         self.root.resizable(True, True)
         
-        # Initialize engine
-        self.engine = None
-        self.init_engine()
+        # Initialize engine using wrapper
+        self.engine = AcousticEngine()
+        print(f"Acoustic Engine {AcousticEngine.get_version()} loaded")
         
         # Audio state
         self.audio_data = None
         self.processed_audio = None
         self.sample_rate = 48000
-        self.audio_file_path = None
         self.is_playing = False
         self.process_pending = False
         
-        # Variables for sliders
+        # Scenario state
+        self.current_scenario = None
+        self.scenario_intensity = tk.DoubleVar(value=1.0)
+        
+        # Variables for perceptual sliders
         self.distance_var = tk.DoubleVar(value=0.5)
         self.spaciousness_var = tk.DoubleVar(value=0.5)
         self.clarity_var = tk.DoubleVar(value=0.5)
@@ -152,15 +94,6 @@ class PerceptualEditorGUI:
         if os.path.exists(default_file):
             self.load_audio_file(default_file)
     
-    def init_engine(self):
-        config = ae.ae_get_default_config()
-        self.engine = ae.ae_create_engine(byref(config))
-        if not self.engine:
-            print("Error: Failed to create engine")
-            sys.exit(1)
-        version = ae.ae_get_version_string()
-        print(f"Acoustic Engine {version.decode('utf-8')} loaded")
-    
     def create_widgets(self):
         # Title
         title_frame = ttk.Frame(self.root)
@@ -168,8 +101,7 @@ class PerceptualEditorGUI:
         
         ttk.Label(title_frame, text="Perceptual Parameter Editor", 
                  font=('Helvetica', 14, 'bold')).pack()
-        version = ae.ae_get_version_string().decode('utf-8')
-        ttk.Label(title_frame, text=f"Acoustic Engine {version}").pack()
+        ttk.Label(title_frame, text=f"Acoustic Engine {AcousticEngine.get_version()}").pack()
         
         # Audio file controls
         audio_frame = ttk.LabelFrame(self.root, text="Audio File", padding=5)
@@ -182,29 +114,66 @@ class PerceptualEditorGUI:
         self.file_label.pack(side='left', padx=5)
         
         ttk.Button(file_row, text="Load", command=self.browse_audio, width=8).pack(side='left', padx=2)
-        ttk.Button(file_row, text="Play", command=self.play_audio, width=8).pack(side='left', padx=2)
-        ttk.Button(file_row, text="Stop", command=self.stop_audio, width=8).pack(side='left', padx=2)
+        ttk.Button(file_row, text="▶ Play", command=self.play_audio, width=8).pack(side='left', padx=2)
+        ttk.Button(file_row, text="■ Stop", command=self.stop_audio, width=8).pack(side='left', padx=2)
         ttk.Button(file_row, text="Export", command=self.export_audio, width=8).pack(side='left', padx=2)
+        
+        # Scenario presets
+        scenario_frame = ttk.LabelFrame(self.root, text="Scenario Presets", padding=5)
+        scenario_frame.pack(fill='x', padx=10, pady=5)
+        
+        # Category tabs using notebook
+        self.scenario_notebook = ttk.Notebook(scenario_frame)
+        self.scenario_notebook.pack(fill='x', pady=5)
+        
+        categories = get_scenarios_by_category()
+        category_names = {"natural": "🌍 Natural", "artificial": "🏛️ Artificial", "emotional": "💭 Emotional"}
+        
+        for cat_key, cat_name in category_names.items():
+            tab = ttk.Frame(self.scenario_notebook)
+            self.scenario_notebook.add(tab, text=cat_name)
+            
+            btn_frame = ttk.Frame(tab)
+            btn_frame.pack(fill='x', pady=5)
+            
+            for i, (scenario, info) in enumerate(categories[cat_key]):
+                btn = ttk.Button(
+                    btn_frame, 
+                    text=f"{info['icon']} {info['name']}", 
+                    width=12,
+                    command=lambda s=scenario: self.apply_scenario(s)
+                )
+                btn.grid(row=i // 4, column=i % 4, padx=2, pady=2)
+        
+        # Intensity slider
+        intensity_row = ttk.Frame(scenario_frame)
+        intensity_row.pack(fill='x', pady=5)
+        
+        ttk.Label(intensity_row, text="Intensity:").pack(side='left', padx=5)
+        intensity_slider = ttk.Scale(intensity_row, from_=0.0, to=1.0, orient='horizontal',
+                 variable=self.scenario_intensity, command=lambda _: self.on_intensity_change())
+        intensity_slider.pack(side='left', fill='x', expand=True, padx=5)
+        self.intensity_label = ttk.Label(intensity_row, text="1.00", width=5)
+        self.intensity_label.pack(side='left')
+        self.scenario_label = ttk.Label(intensity_row, text="(No scenario)", width=15)
+        self.scenario_label.pack(side='left')
         
         # Waveform visualization
         if MATPLOTLIB_AVAILABLE:
-            wave_frame = ttk.LabelFrame(self.root, text="Waveform (Original: Blue, Processed: Orange)", padding=5)
+            wave_frame = ttk.LabelFrame(self.root, text="Waveform (Blue: Original, Orange: Processed)", padding=5)
             wave_frame.pack(fill='both', expand=True, padx=10, pady=5)
             
-            self.fig = Figure(figsize=(6, 2.5), dpi=100)
+            self.fig = Figure(figsize=(6, 2), dpi=100)
             self.fig.patch.set_facecolor('#f0f0f0')
             self.ax = self.fig.add_subplot(111)
             self.ax.set_facecolor('#ffffff')
-            self.ax.set_xlabel('Time (s)', fontsize=8)
-            self.ax.set_ylabel('Amplitude', fontsize=8)
-            self.ax.tick_params(labelsize=7)
             self.fig.tight_layout()
             
             self.canvas = FigureCanvasTkAgg(self.fig, master=wave_frame)
             self.canvas.get_tk_widget().pack(fill='both', expand=True)
         
         # Perceptual parameters
-        perc_frame = ttk.LabelFrame(self.root, text="Perceptual Parameters", padding=10)
+        perc_frame = ttk.LabelFrame(self.root, text="Perceptual Parameters (override scenario)", padding=10)
         perc_frame.pack(fill='x', padx=10, pady=5)
         
         self.create_slider(perc_frame, "Distance (near → far)", self.distance_var)
@@ -230,7 +199,7 @@ class PerceptualEditorGUI:
         # Reset button
         btn_frame = ttk.Frame(self.root)
         btn_frame.pack(pady=5)
-        ttk.Button(btn_frame, text="Reset Parameters", command=self.reset_parameters).pack()
+        ttk.Button(btn_frame, text="Reset All", command=self.reset_all).pack()
         
         # Status bar
         self.status_var = tk.StringVar(value="Ready")
@@ -249,6 +218,37 @@ class PerceptualEditorGUI:
         value_label = ttk.Label(frame, text="0.50", width=5)
         value_label.pack(side='left')
         variable.label = value_label
+    
+    def apply_scenario(self, scenario: Scenario):
+        """Apply a scenario preset"""
+        try:
+            intensity = self.scenario_intensity.get()
+            self.engine.apply_scenario(scenario, intensity)
+            self.current_scenario = scenario
+            
+            info = SCENARIO_INFO[scenario]
+            self.scenario_label.config(text=f"{info['icon']} {info['name']}")
+            self.intensity_label.config(text=f"{intensity:.2f}")
+            self.status_var.set(f"Applied: {info['name']} (intensity={intensity:.2f})")
+            
+            # Update physical params display
+            self.update_physical_display()
+            
+            # Auto-process
+            if self.audio_data is not None:
+                self.process_audio()
+                self.update_waveform()
+                
+        except Exception as e:
+            self.status_var.set(f"Error: {e}")
+    
+    def on_intensity_change(self):
+        """Re-apply current scenario when intensity changes"""
+        intensity = self.scenario_intensity.get()
+        self.intensity_label.config(text=f"{intensity:.2f}")
+        
+        if self.current_scenario is not None:
+            self.apply_scenario(self.current_scenario)
     
     def on_slider_change(self):
         # Update labels
@@ -269,26 +269,35 @@ class PerceptualEditorGUI:
         self.update_waveform()
     
     def update_parameters(self):
-        if not self.engine:
-            return
-        
-        ae.ae_set_perceived_distance(self.engine, c_float(self.distance_var.get()))
-        ae.ae_set_perceived_spaciousness(self.engine, c_float(self.spaciousness_var.get()))
-        ae.ae_set_perceived_clarity(self.engine, c_float(self.clarity_var.get()))
-        
-        params = ae_main_params_t()
-        if ae.ae_get_main_params(self.engine, byref(params)) == 0:
+        """Apply perceptual parameters via wrapper"""
+        try:
+            self.engine.set_perceived_distance(self.distance_var.get())
+            self.engine.set_perceived_spaciousness(self.spaciousness_var.get())
+            self.engine.set_perceived_clarity(self.clarity_var.get())
+            self.update_physical_display()
+        except Exception as e:
+            self.status_var.set(f"Error: {e}")
+    
+    def update_physical_display(self):
+        """Update physical parameters display"""
+        try:
+            params = self.engine.get_main_params()
             self.phys_labels['distance'].config(text=f"{params.distance:.1f}m")
             self.phys_labels['room_size'].config(text=f"{params.room_size:.2f}")
             self.phys_labels['brightness'].config(text=f"{params.brightness:.2f}")
             self.phys_labels['width'].config(text=f"{params.width:.2f}")
             self.phys_labels['dry_wet'].config(text=f"{params.dry_wet:.2f}")
             self.phys_labels['intensity'].config(text=f"{params.intensity:.2f}")
+        except:
+            pass
     
-    def reset_parameters(self):
+    def reset_all(self):
         self.distance_var.set(0.5)
         self.spaciousness_var.set(0.5)
         self.clarity_var.set(0.5)
+        self.scenario_intensity.set(1.0)
+        self.current_scenario = None
+        self.scenario_label.config(text="(No scenario)")
         self.on_slider_change()
     
     def update_waveform(self):
@@ -297,18 +306,13 @@ class PerceptualEditorGUI:
         
         self.ax.clear()
         
-        # Downsample for display (max 2000 points)
         n_samples = len(self.audio_data)
         step = max(1, n_samples // 2000)
-        
-        # Time axis
         times = np.arange(0, n_samples, step) / self.sample_rate
         
-        # Original waveform (mono mix)
         original_mono = (self.audio_data[::step, 0] + self.audio_data[::step, 1]) / 2
         self.ax.plot(times, original_mono, color='#3498db', alpha=0.7, linewidth=0.8, label='Original')
         
-        # Processed waveform
         if self.processed_audio is not None:
             processed_mono = (self.processed_audio[::step, 0] + self.processed_audio[::step, 1]) / 2
             self.ax.plot(times, processed_mono, color='#e67e22', alpha=0.8, linewidth=0.8, label='Processed')
@@ -319,7 +323,6 @@ class PerceptualEditorGUI:
         self.ax.legend(loc='upper right', fontsize=7)
         self.ax.tick_params(labelsize=7)
         self.fig.tight_layout()
-        
         self.canvas.draw()
     
     def browse_audio(self):
@@ -365,10 +368,7 @@ class PerceptualEditorGUI:
             else:
                 raise ValueError(f"Unsupported format: {ext}")
             
-            self.audio_file_path = filepath
             self.file_label.config(text=os.path.basename(filepath))
-            
-            # Initial process and display
             self.process_audio()
             self.update_waveform()
             
@@ -383,37 +383,80 @@ class PerceptualEditorGUI:
         if self.audio_data is None:
             return
         
-        params = ae_main_params_t()
-        ae.ae_get_main_params(self.engine, byref(params))
+        try:
+            params = self.engine.get_main_params()
+        except:
+            return
         
         processed = self.audio_data.copy()
         
-        # Distance -> attenuation
-        distance_factor = 1.0 / (1.0 + params.distance * 0.1)
+        # 1. Distance attenuation (stronger exponential falloff)
+        # distance: 1m = 1.0, 50m = 0.17, 100m = 0.10
+        distance_factor = 1.0 / (1.0 + params.distance * 0.05) ** 1.5
         processed *= distance_factor
         
-        # Brightness -> simple filter
-        if params.brightness < 0:
-            alpha = 0.3 + 0.7 * (1.0 + params.brightness)
-            for i in range(1, len(processed)):
-                processed[i] = alpha * processed[i] + (1 - alpha) * processed[i-1]
+        # 2. Brightness filter (IIR low-pass and high-pass)
+        # brightness < 0: low-pass (darken)
+        # brightness > 0: high-pass emphasis (brighten)
+        if abs(params.brightness) > 0.05:
+            if params.brightness < 0:
+                # Stronger low-pass: alpha 0.1 (dark) to 1.0 (neutral)
+                alpha = 0.1 + 0.9 * (1.0 + params.brightness)
+                alpha = max(0.1, min(1.0, alpha))
+                for ch in range(2):
+                    for i in range(1, len(processed)):
+                        processed[i, ch] = alpha * processed[i, ch] + (1 - alpha) * processed[i-1, ch]
+            else:
+                # High-frequency emphasis (simple high-pass + original)
+                hp_alpha = 0.85 - params.brightness * 0.3
+                hp_alpha = max(0.4, min(0.95, hp_alpha))
+                for ch in range(2):
+                    prev = 0.0
+                    for i in range(len(processed)):
+                        hp = hp_alpha * (prev + processed[i, ch] - (processed[i-1, ch] if i > 0 else 0))
+                        processed[i, ch] = processed[i, ch] + hp * params.brightness * 0.5
+                        prev = hp
         
-        # Width -> stereo adjustment
-        if params.width != 1.0:
-            mid = (processed[:, 0] + processed[:, 1]) / 2
-            side = (processed[:, 0] - processed[:, 1]) / 2 * params.width
+        # 3. Stereo width (M/S processing)
+        if abs(params.width - 1.0) > 0.01:
+            mid = (processed[:, 0] + processed[:, 1]) * 0.5
+            side = (processed[:, 0] - processed[:, 1]) * 0.5 * params.width
             processed[:, 0] = mid + side
             processed[:, 1] = mid - side
         
-        # Dry/wet -> reverb simulation
-        if params.dry_wet > 0.1:
-            delay = int(0.05 * self.sample_rate)
-            if delay < len(processed):
-                reverb = np.zeros_like(processed)
-                reverb[delay:] = processed[:-delay] * 0.3 * params.dry_wet
-                processed = processed * (1.0 - params.dry_wet * 0.5) + reverb
+        # 4. Reverb simulation (multi-tap delay with room_size)
+        if params.dry_wet > 0.05:
+            # Base delay from room_size (small room: 20ms, large: 100ms)
+            base_delay_sec = 0.02 + params.room_size * 0.08
+            
+            reverb = np.zeros_like(processed)
+            taps = [
+                (base_delay_sec * 1.0, 0.35),
+                (base_delay_sec * 1.7, 0.25),
+                (base_delay_sec * 2.8, 0.18),
+                (base_delay_sec * 4.3, 0.12),
+                (base_delay_sec * 6.0, 0.08),
+            ]
+            
+            for delay_sec, gain in taps:
+                delay_samples = int(delay_sec * self.sample_rate)
+                if delay_samples < len(processed):
+                    reverb[delay_samples:] += processed[:-delay_samples] * gain
+            
+            # Apply room_size to reverb diffusion (blur)
+            if params.room_size > 0.3:
+                blur_len = int(params.room_size * 100)
+                kernel = np.ones(blur_len) / blur_len
+                for ch in range(2):
+                    reverb[:, ch] = np.convolve(reverb[:, ch], kernel, mode='same')
+            
+            # Mix dry/wet
+            wet_gain = params.dry_wet * params.intensity
+            dry_gain = 1.0 - params.dry_wet * 0.7
+            processed = dry_gain * processed + wet_gain * reverb
         
-        # Normalize
+        # 5. Soft clipping and normalization
+        processed = np.tanh(processed * 1.2) / 1.2  # Soft clip
         max_val = np.max(np.abs(processed))
         if max_val > 0.95:
             processed *= 0.95 / max_val
@@ -476,8 +519,7 @@ class PerceptualEditorGUI:
     
     def on_close(self):
         self.stop_audio()
-        if self.engine:
-            ae.ae_destroy_engine(self.engine)
+        self.engine.close()
         self.root.destroy()
 
 
