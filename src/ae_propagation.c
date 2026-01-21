@@ -3,6 +3,7 @@
  * @brief Physical propagation models (Francois-Garrison, ISO 9613-1, Cave)
  */
 
+#include "../include/acoustic_engine.h"
 #include "ae_internal.h"
 
 /**
@@ -15,7 +16,8 @@
  * @param D Depth in meters
  * @return Absorption coefficient in dB/km
  */
-float ae_francois_garrison_absorption(float f_khz, float T, float S, float D) {
+AE_API float ae_francois_garrison_absorption(float f_khz, float T, float S,
+                                             float D) {
   /* pH value (typically 8 for seawater) */
   float pH = 8.0f;
 
@@ -61,8 +63,8 @@ float ae_francois_garrison_absorption(float f_khz, float T, float S, float D) {
  * @param pressure_kpa Atmospheric pressure in kPa
  * @return Absorption coefficient in dB/m
  */
-float ae_iso9613_absorption(float f_hz, float T_celsius, float humidity_pct,
-                            float pressure_kpa) {
+AE_API float ae_iso9613_absorption(float f_hz, float T_celsius,
+                                   float humidity_pct, float pressure_kpa) {
   /* Reference values */
   float T0 = 293.15f;            /* Reference temperature (K) */
   float T01 = 273.16f;           /* Triple point of water (K) */
@@ -102,8 +104,8 @@ float ae_iso9613_absorption(float f_hz, float T_celsius, float humidity_pct,
  * @param temperature_c Temperature in Celsius (affects sound speed)
  * @return Resonance frequency in Hz
  */
-float ae_cave_modal_frequency(float dimension_m, int mode_number,
-                              float temperature_c) {
+AE_API float ae_cave_modal_frequency(float dimension_m, int mode_number,
+                                     float temperature_c) {
   /* Sound speed: c = 331.3 + 0.606 * T */
   float c = 331.3f + 0.606f * temperature_c;
   if (dimension_m <= 0.0f || mode_number < 1) {
@@ -120,8 +122,8 @@ float ae_cave_modal_frequency(float dimension_m, int mode_number,
  * @param delay_ms_out Output: flutter delay in milliseconds
  * @param flutter_freq_out Output: flutter frequency in Hz
  */
-void ae_calculate_flutter(float wall_distance_m, float temperature_c,
-                          float *delay_ms_out, float *flutter_freq_out) {
+AE_API void ae_calculate_flutter(float wall_distance_m, float temperature_c,
+                                 float *delay_ms_out, float *flutter_freq_out) {
   float c = 331.3f + 0.606f * temperature_c;
   if (wall_distance_m <= 0.0f || !delay_ms_out || !flutter_freq_out) {
     if (delay_ms_out)
@@ -145,7 +147,8 @@ void ae_calculate_flutter(float wall_distance_m, float temperature_c,
  * @param avg_alpha Average absorption coefficient (0-1)
  * @return RT60 in seconds
  */
-float ae_eyring_rt60(float volume_m3, float surface_m2, float avg_alpha) {
+AE_API float ae_eyring_rt60(float volume_m3, float surface_m2,
+                            float avg_alpha) {
   if (volume_m3 <= 0.0f || surface_m2 <= 0.0f || avg_alpha <= 0.0f) {
     return 0.0f;
   }
@@ -163,7 +166,7 @@ float ae_eyring_rt60(float volume_m3, float surface_m2, float avg_alpha) {
  * @param f_hz Frequency in Hz
  * @return Absorption coefficient (0-1)
  */
-float ae_rock_wall_absorption(float f_hz) {
+AE_API float ae_rock_wall_absorption(float f_hz) {
   /* Approximate absorption curve for limestone */
   float alpha_125 = 0.02f;
   float alpha_4k = 0.08f;

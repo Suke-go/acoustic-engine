@@ -60,6 +60,13 @@ if exist Release\test_analysis.exe (
     echo.
 )
 
+if exist Release\test_auditory.exe (
+    echo --- Running test_auditory ---
+    Release\test_auditory.exe
+    if errorlevel 1 (set /a TOTAL_FAIL+=1) else (set /a TOTAL_PASS+=1)
+    echo.
+)
+
 cd ..
 
 echo === Summary ===

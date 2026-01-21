@@ -490,7 +490,12 @@ AE_API ae_result_t ae_import_audio_file(ae_engine_t *engine, const char *path,
   if (decoded.samples)
     free(decoded.samples);
 
+#if AE_ENABLE_EXTERNAL_DECODER
   return ae_audio_io_decode_ffmpeg(path, out, engine);
+#else
+  ae_audio_io_set_error(engine, "External decoder disabled");
+  return AE_ERROR_INVALID_PARAM;
+#endif
 }
 
 AE_API void ae_free_audio_data(ae_audio_data_t *data) {

@@ -43,7 +43,8 @@ $TestResults = @()
 $TestExes = @(
     "Release\test_math.exe",
     "Release\test_dsp.exe",
-    "Release\test_analysis.exe"
+    "Release\test_analysis.exe",
+    "Release\test_auditory.exe"
 )
 
 foreach ($TestExe in $TestExes) {

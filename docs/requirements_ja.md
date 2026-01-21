@@ -1,8 +1,8 @@
 # Acoustic Engine 要件定義書
 
 > **バージョン**: 0.2.0-draft  
-> **更新日**: 2026-01-21  
-> **ステータス**: AMT互換機能追加
+> **更新日**: 2026-01-22  
+> **ステータス**: 仕様整合性修正完了
 
 ---
 
@@ -124,6 +124,45 @@ Acoustic Engineは、複数の音響シナリオをサポートします。各�
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+#### 2.2.1 Scenario Blender 合成規約
+
+##### カテゴリ分類
+
+| カテゴリ | シナリオ |
+|---------|---------|
+| **environment** | deep_sea, cave, forest, cathedral, open_field, space, office, tunnel, small_room |
+| **emotion** | tension, nostalgia, dream, intimate, chaos, ethereal |
+| **effect** | radio, telephone |
+
+##### 合成ルール
+
+1. **カテゴリ内正規化**: 同一カテゴリ内のウェイトは合計1.0に正規化
+2. **カテゴリ間乗算**: environment と emotion のパラメータを合成
+3. **effect適用**: effect は最終出力にポストプロセスとして適用
+
+```c
+// 例: deep_sea: 0.6, cave: 0.3, tension: 0.4
+// Step 1: environment正規化
+//   deep_sea: 0.6/(0.6+0.3) = 0.67
+//   cave: 0.3/(0.6+0.3) = 0.33
+// Step 2: emotion (tension: 0.4 は intensity として使用)
+// Step 3: 合成
+//   env_params = lerp(deep_sea_params, cave_params, 0.33)
+//   final_params = apply_emotion_modifier(env_params, tension, 0.4)
+```
+
+##### クランプ方針
+
+合成後のパラメータは各定義域内にクランプ:
+
+| パラメータ | 下限 | 上限 | 備考 |
+|-----------|-----|-----|------|
+| `rt60` | 0.1 sec | 30.0 sec | - |
+| `damping` | 0.0 | 1.0 | - |
+| `width` | 0.0 | 2.0 | - |
+| `gain` | -60 dB | +12 dB | リミッター保護 |
+| `dry_wet` | 0.0 | 1.0 | - |
 
 ### 2.3 シナリオAPI
 
@@ -1809,7 +1848,7 @@ ae_result_t ae_normalize_loudness(
 
 ユーザーが直接操作するパラメータを最小限に抑えつつ、内部で複雑な処理を行う設計です。
 
-#### 3.9.1 設計思想
+#### 3.10.1 設計思想
 
 ```
 ユーザー操作: 10個のシンプルなパラメータ
@@ -1819,7 +1858,7 @@ ae_result_t ae_normalize_loudness(
 処理: 各モジュールが詳細パラメータを使用
 ```
 
-#### 3.8.2 Tier 1: メインパラメータ (6個)
+#### 3.10.2 Tier 1: メインパラメータ (6個)
 
 常に表示され、基本的な音作りに使用する中核パラメータ。
 
@@ -1832,7 +1871,7 @@ ae_result_t ae_normalize_loudness(
 | **dry_wet** | 0.0 - 1.0 | 原音/エフェクト比 | 各エフェクトのウェット量 |
 | **intensity** | 0.0 - 1.0 | シナリオ効果の強さ | 全パラメータのスケーリング |
 
-#### 3.8.3 Tier 2: 拡張パラメータ (4個)
+#### 3.10.3 Tier 2: 拡張パラメータ (4個)
 
 詳細な調整が必要な場合に使用するオプションパラメータ。
 
@@ -1843,7 +1882,7 @@ ae_result_t ae_normalize_loudness(
 | **lofi_amount** | 0.0 - 1.0 | ローファイ効果量 | ビット深度、ノイズ、フラッター |
 | **modulation** | 0.0 - 1.0 | 変調の強さ | ピッチ揺れ、コーラス深度 |
 
-#### 3.8.4 C API
+#### 3.10.4 C API
 
 ```c
 // メインパラメータ構造体
@@ -1891,7 +1930,7 @@ ae_result_t ae_set_dry_wet(ae_engine_t* engine, float value);
 ae_result_t ae_set_intensity(ae_engine_t* engine, float value);
 ```
 
-#### 3.8.5 シナリオ別デフォルト値
+#### 3.10.5 シナリオ別デフォルト値
 
 | シナリオ | distance | room_size | brightness | width | dry_wet | intensity |
 |---------|----------|-----------|------------|-------|---------|-----------|
@@ -1903,7 +1942,7 @@ ae_result_t ae_set_intensity(ae_engine_t* engine, float value);
 | nostalgia | 8.0 | 0.45 | -0.30 | 1.00 | 0.55 | 1.00 |
 | intimate | 1.0 | 0.15 | 0.10 | 0.40 | 0.25 | 1.00 |
 
-#### 3.8.6 内部パラメータへの変換例
+#### 3.10.6 内部パラメータへの変換例
 
 `brightness = -0.5` の場合:
 
@@ -1923,6 +1962,83 @@ internal.rt60 = 8.0f;               // 残響時間
 internal.pre_delay_ms = 80.0f;      // プリディレイ
 internal.er_density = 0.7f;         // ER密度
 internal.er_pattern = "scattered";   // ERパターン
+```
+
+#### 3.10.7 距離パラメータの定義
+
+##### 二種類の距離表現
+
+| パラメータ | 範囲 | 用途 | 説明 |
+|-----------|-----|------|------|
+| `distance_m` | 0.1 - 1000 m | 物理伝播計算 | メートル単位の物理的距離 |
+| `distance` | 0.0 - 1.0 | セマンティック表現 | 知覚的距離スライダー |
+
+##### 変換関数
+
+Zahorik (2002) の圧縮則に基づく対数スケール変換:
+
+```c
+// 知覚距離 (0-1) から物理距離 (m) への変換
+float ae_perceptual_to_physical_distance(float perceptual) {
+    // perceptual: 0.0 (最も近い) - 1.0 (最も遠い)
+    // 出力: 0.1m - 1000m (対数スケール)
+    const float d_min = 0.1f;
+    const float d_max = 1000.0f;
+    return d_min * powf(d_max / d_min, perceptual);
+}
+
+// 物理距離 (m) から知覚距離 (0-1) への変換
+float ae_physical_to_perceptual_distance(float distance_m) {
+    const float d_min = 0.1f;
+    const float d_max = 1000.0f;
+    float clamped = fmaxf(d_min, fminf(d_max, distance_m));
+    return logf(clamped / d_min) / logf(d_max / d_min);
+}
+```
+
+##### 使い分け
+
+| API / Context | 使用するパラメータ |
+|--------------|------------------|
+| `ae_set_distance()` | `distance` (0-1) - ユーザー向けスライダー |
+| `ae_propagation_*()` | `distance_m` - 物理計算 |
+| Semantic Expression | `distance` (0-1) |
+| Scenario Preset | `distance` (0-1) で定義、内部で `distance_m` に変換 |
+
+#### 3.10.8 パラメータ優先順位と合成則
+
+##### 優先順位（高→低）
+
+| 優先度 | ソース | 説明 |
+|-------|-------|------|
+| 1 | Explicit Override | `ae_set_internal_*` による直接指定 |
+| 2 | Extended Params | Tier 2 パラメータ（decay_time 等） |
+| 3 | Main Params | Tier 1 パラメータ（distance 等） |
+| 4 | Scenario Preset | シナリオのデフォルト値 |
+| 5 | Engine Default | エンジン初期値 |
+
+##### 合成則
+
+| 内部パラメータ | 合成方法 | 備考 |
+|--------------|---------|------|
+| `rt60` | `decay_time > 0` なら使用、else `room_size` から計算 | 数式: `rt60 = 0.1 + room_size * 29.9` |
+| `damping` | `preset_damping + brightness * 0.3` | brightness 負 → damping 増 |
+| `dry_wet` | 直接使用、シナリオ値と linear interpolation | - |
+| `width` (M/S) | 直接使用 | - |
+| `tilt_db` | `brightness * 6.0` | [-6, +6] dB |
+| `distance_m` | `ae_perceptual_to_physical_distance(distance)` | 対数変換 |
+
+##### 競合解決の例
+
+```c
+// ユーザーが room_size=0.5 かつ decay_time=8.0 を指定
+// → decay_time が優先され、rt60 = 8.0s
+
+// シナリオ deep_sea (damping=0.7) + ユーザー brightness=-0.3
+// → damping = 0.7 + (-0.3) * 0.3 = 0.61
+
+// シナリオ cathedral (distance=0.8) を intensity=0.5 で適用
+// → distance = lerp(engine_default, 0.8, 0.5) = 0.4 (仮定: default=0.0)
 ```
 
 ---
@@ -2192,6 +2308,76 @@ AE_API void ae_free_auditory_representation(ae_auditory_repr_t* repr);
 | Phase 2 (v0.3.0) | 変調フィルタバンク, ラフネス, シャープネス, 変動強度 | 6日 |
 | Phase 3 (v0.4.0) | DRNL, BMLD, SII | 6日 |
 
+#### 3.11.8 AMT互換性定義
+
+##### 互換レベル
+
+| レベル | 説明 | v0.2.0 対応 |
+|-------|------|------------|
+| **AMT-like** | 構造が同じ、パラメータが近い | ✅ 全モジュール |
+| **AMT-compatible** | 代表設定で数値一致（許容誤差定義あり） | ✅ Gammatone, IHC, 適応ループ |
+| **AMT-validated** | AMTテストケース一式で検証済み | ❌ v0.3.0 以降 |
+
+##### 検証テストケース
+
+**入力信号**:
+1. 1kHz 純音 (80 dB SPL, 500 ms)
+2. AM ノイズ (fc=4kHz, fm=8Hz, md=1.0)
+3. クリックトレイン (ICI=10ms)
+4. 音声サンプル (TIMIT から1サンプル)
+
+**検証基準**:
+
+| モジュール | 指標 | 許容誤差 |
+|-----------|-----|---------|
+| Gammatone | 出力 RMS | ≤ 1% |
+| Gammatone | 群遅延 | ≤ 1 sample |
+| IHC | エンベロープ時定数 | ≤ 5% |
+| 適応ループ | Forward masking 減衰曲線 | r² ≥ 0.99 |
+| 変調FB | ピーク位置 | ≤ 0.5 Hz |
+
+##### デフォルトパラメータセット (AMT準拠)
+
+```c
+// ERBスケール中心周波数計算 (Glasberg & Moore, 1990)
+// ERB(f) = 24.7 * (4.37 * f/1000 + 1)
+// f_c[i] は ERB スケールで等間隔に配置
+
+const ae_gammatone_config_t AE_AMT_GAMMATONE_DEFAULTS = {
+    .n_channels = 32,
+    .f_low = 80.0f,
+    .f_high = 16000.0f,
+    .filter_order = 4,
+    .sample_rate = 48000
+};
+
+const ae_ihc_config_t AE_AMT_IHC_DEFAULTS = {
+    .compression_exponent = 0.3f,
+    .lpf_cutoff_hz = 1000.0f  // 1st order Butterworth
+};
+
+const ae_adaptloop_config_t AE_AMT_ADAPTLOOP_DEFAULTS = {
+    .n_stages = 5,
+    .time_constants = {5.0f, 50.0f, 129.0f, 253.0f, 500.0f},  // ms
+    .min_output = 1e-5f,
+    .sample_rate = 48000
+};
+```
+
+##### 離散化仕様
+
+適応ループの差分方程式 (Dau et al., 1996):
+
+```
+A[n+1] = A[n] + (dt/τ) × (A_min + |A[n] - A_min|) × (x[n] - A[n])
+
+ここで:
+  dt = 1 / sample_rate
+  τ = 時定数 (sec)
+  A_min = 最小出力値
+  x[n] = 入力信号
+```
+
 ---
 
 ## 4. 非機能要件
@@ -2215,6 +2401,97 @@ AE_API void ae_free_auditory_representation(ae_auditory_repr_t* repr);
 | Linux x64 | Phase 1 (source) | so |
 | WebAssembly | Phase 3 | WASM |
 
+Phase 1 = ソースからのビルドサポート、Phase 2 = バイナリ配布。
+
+#### 4.2.1 macOS/Linux ビルド要件
+
+- CMake >= 3.16
+- コンパイラ: macOS = clang, Linux = gcc/clang
+- ビルドツール: Ninja または Make
+- `AE_USE_LIBMYSOFA` は任意 (OFFでSOFA/HRTF無効)
+- `AE_ENABLE_EXTERNAL_DECODER` は任意 (ONで外部デコーダ有効)
+- 外部デコーダは同梱しない (環境に存在する場合のみ使用)
+
+#### 4.2.2 オーディオバッファ規約 (v0.2.0)
+
+##### サンプルフォーマット
+
+| 項目 | v0.2.0 仕様 | 将来拡張 |
+|-----|------------|---------|
+| **Sample Type** | `float32` のみ | int16, int24 |
+| **Layout** | Interleaved | Planar 追加検討 |
+| **Channels** | Mono / Stereo | 5.1, Ambisonic |
+| **Endian** | Native | - |
+
+##### 構造体定義
+
+```c
+typedef struct {
+    float* data;              // Interleaved: [L0,R0,L1,R1,...] or Mono: [S0,S1,...]
+    size_t n_frames;          // サンプル数 (1フレーム = 全チャンネル分)
+    uint8_t n_channels;       // 1 (Mono) or 2 (Stereo)
+    uint32_t sample_rate;     // 44100, 48000, 96000 等
+} ae_audio_buffer_t;
+```
+
+##### In-place 処理
+
+```c
+// in-place 処理は保証される (input == output 可)
+ae_result_t ae_process(ae_engine_t* engine, 
+                       float* input,
+                       float* output,  // input と同一ポインタ可
+                       size_t n_frames);
+```
+
+##### アライメント要件
+
+| SIMD | アライメント | 備考 |
+|-----|------------|------|
+| Scalar | なし | - |
+| SSE2 | 16-byte | `_mm_load_ps` 使用時 |
+| AVX2 | 32-byte | `_mm256_load_ps` 使用時 |
+
+推奨: `_aligned_malloc(size, 32)` または `posix_memalign` を使用
+
+#### 4.2.3 リアルタイム安全性 (RT-safe)
+
+##### RT-safe 関数一覧
+
+| 関数 | RT-safe | 備考 |
+|-----|---------|------|
+| `ae_process()` | ✅ | メイン処理ループ |
+| `ae_set_*()` パラメータ設定 | ✅ | atomic 更新 |
+| `ae_update_biosignal()` | ✅ | lock-free |
+| `ae_apply_scenario()` | ⚠️ | 初回のみプリセット読込あり |
+| `ae_create_engine()` | ❌ | malloc あり |
+| `ae_destroy_engine()` | ❌ | free あり |
+| `ae_load_preset()` | ❌ | ファイルI/O あり |
+| `ae_gammatone_create()` | ❌ | malloc あり |
+| `ae_compute_*()` 分析関数 | ❌ | 一時バッファ確保あり |
+
+##### RT-safe 保証事項
+
+RT-safe 関数では以下を禁止:
+
+- ❌ `malloc` / `free` / `realloc`
+- ❌ mutex / lock / semaphore
+- ❌ ファイル I/O
+- ❌ 例外 (C++ 混在時)
+- ❌ システムコール (sleep, print 等)
+
+##### Denormal 対策
+
+```c
+// エンジン初期化時に設定 (x86/x64)
+#include <xmmintrin.h>
+_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+```
+
+IIRフィルタ、FDN、適応ループでは denormal によるCPUスパイクを防止するため、
+小さな値 (`1e-15f` 程度) を加算する手法も併用。
+
 ### 4.3 言語バインディング
 
 | 言語 | 優先度 | 用途 |
@@ -2224,9 +2501,190 @@ AE_API void ae_free_auditory_representation(ae_auditory_repr_t* repr);
 | C# (P/Invoke) | Phase 2 | Unity連携 |
 | JavaScript | Phase 3 | WebAudio, TouchDesigner |
 
-### 4.4 API詳細仕様
+---
 
-#### 4.4.1 オーディオバッファ仕様
+### 4.4 プラグイン・DLL統合仕様
+
+Acoustic Engine を外部アプリケーション（ゲームエンジン、DAW、カスタムアプリケーション）から利用するためのネイティブプラグイン設計指針。
+
+#### 4.4.1 設計原則
+
+| 原則 | 説明 |
+|-----|------|
+| **Pure C API** | C++ マングリングを避け、どの言語からも呼び出し可能 |
+| **Opaque Handle** | 内部構造を隠蔽し、ABI安定性を確保 |
+| **スレッドセーフ** | オーディオスレッドからの呼び出しを想定 |
+| **ゼロアロケーション処理** | `ae_process()` 内でヒープ割り当てしない |
+| **明示的ライフサイクル** | create/destroy パターンでリソース管理 |
+
+#### 4.4.2 エクスポートマクロ
+
+```c
+// Windows: __declspec(dllexport/dllimport)
+// macOS/Linux: __attribute__((visibility("default")))
+#ifdef _WIN32
+    #ifdef AE_BUILD_DLL
+        #define AE_API __declspec(dllexport)
+    #else
+        #define AE_API __declspec(dllimport)
+    #endif
+#else
+    #define AE_API __attribute__((visibility("default")))
+#endif
+
+// 呼び出し規約 (Windows)
+#ifdef _WIN32
+    #define AE_CALL __cdecl
+#else
+    #define AE_CALL
+#endif
+```
+
+#### 4.4.3 Unity 統合
+
+##### C# P/Invoke バインディング
+
+```csharp
+using System;
+using System.Runtime.InteropServices;
+
+public static class AcousticEngine
+{
+    private const string DLL_NAME = "acoustic_engine";
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern IntPtr ae_create_engine(ref AeConfig config);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern void ae_destroy_engine(IntPtr engine);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int ae_process(
+        IntPtr engine,
+        ref AeAudioBuffer input,
+        ref AeAudioBuffer output
+    );
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    public static extern int ae_apply_scenario(
+        IntPtr engine,
+        [MarshalAs(UnmanagedType.LPStr)] string scenarioName,
+        float intensity
+    );
+}
+
+[StructLayout(LayoutKind.Sequential)]
+public struct AeAudioBuffer
+{
+    public IntPtr samples;
+    public UIntPtr frameCount;
+    public byte channels;
+    [MarshalAs(UnmanagedType.I1)]
+    public bool interleaved;
+}
+```
+
+##### Unity OnAudioFilterRead 使用例
+
+```csharp
+public class AcousticEngineFilter : MonoBehaviour
+{
+    private IntPtr _engine;
+
+    void Start()
+    {
+        var config = AcousticEngine.GetDefaultConfig();
+        _engine = AcousticEngine.ae_create_engine(ref config);
+    }
+
+    void OnAudioFilterRead(float[] data, int channels)
+    {
+        if (_engine == IntPtr.Zero) return;
+        GCHandle handle = GCHandle.Alloc(data, GCHandleType.Pinned);
+        try
+        {
+            var buffer = new AeAudioBuffer
+            {
+                samples = handle.AddrOfPinnedObject(),
+                frameCount = (UIntPtr)(data.Length / channels),
+                channels = (byte)channels,
+                interleaved = true
+            };
+            AcousticEngine.ae_process(_engine, ref buffer, ref buffer);
+        }
+        finally { handle.Free(); }
+    }
+
+    void OnDestroy()
+    {
+        if (_engine != IntPtr.Zero)
+        {
+            AcousticEngine.ae_destroy_engine(_engine);
+            _engine = IntPtr.Zero;
+        }
+    }
+}
+```
+
+##### Unity DLL 配置
+
+```
+Assets/Plugins/
+├── x86_64/acoustic_engine.dll      # Windows x64
+├── macOS/acoustic_engine.bundle    # macOS Universal
+└── Linux/libacoustic_engine.so     # Linux x64
+```
+
+#### 4.4.4 Unreal Engine 統合
+
+```cpp
+// UE Source Effect 統合例
+UCLASS()
+class UAcousticEngineSourceEffect : public USoundEffectSourcePreset
+{
+    GENERATED_BODY()
+public:
+    UPROPERTY(EditAnywhere) float Distance = 10.0f;
+    UPROPERTY(EditAnywhere) FString ScenarioName = TEXT("deep_sea");
+};
+```
+
+#### 4.4.5 VST3 / AU プラグイン
+
+VST3 プロセッサおよび Audio Unit v3 での統合をサポート。詳細は外部ドキュメント参照。
+
+#### 4.4.6 リアルタイムスレッド制約
+
+```c
+// オーディオスレッドから呼び出し可能 (ロックフリー)
+ae_process(...);           // ✓ RT-safe
+ae_set_distance(...);      // ✓ RT-safe (atomic)
+
+// メインスレッドからのみ
+ae_create_engine(...);     // ✗ NOT RT-safe (allocates)
+ae_destroy_engine(...);    // ✗ NOT RT-safe (frees)
+ae_load_preset(...);       // ✗ NOT RT-safe (file I/O)
+```
+
+#### 4.4.7 バージョニングとABI
+
+```c
+AE_API uint32_t ae_get_version(void);       // 0x000100 = 0.1.0
+AE_API const char* ae_get_version_string(void);
+AE_API bool ae_check_abi_compatibility(uint32_t expected_version);
+```
+
+| バージョン変更 | ABI互換性 |
+|--------------|----------|
+| パッチ (0.1.x) | 完全互換 |
+| マイナー (0.x.0) | 後方互換 |
+| メジャー (x.0.0) | 互換性なし |
+
+---
+
+### 4.5 API詳細仕様
+
+#### 4.5.1 オーディオバッファ仕様
 
 ```c
 // オーディオバッファ構造体
@@ -2253,7 +2711,7 @@ ae_result_t ae_process(
 | バッファアライメント | 16バイト境界推奨 (SIMD効率) |
 | inplace処理 | 許可 (input == output) |
 
-#### 4.4.2 エラー処理
+#### 4.5.2 エラー処理
 
 ```c
 // 結果コード
@@ -2274,7 +2732,7 @@ const char* ae_get_error_string(ae_result_t result);
 const char* ae_get_last_error_detail(ae_engine_t* engine);
 ```
 
-#### 4.4.3 スレッドセーフティ
+#### 4.5.3 スレッドセーフティ
 
 | 操作 | スレッドセーフ | 備考 |
 |-----|--------------|------|
@@ -2302,7 +2760,7 @@ void load_preset_async(const char* name) {
 }
 ```
 
-#### 4.4.4 パラメータ優先順位
+#### 4.5.4 パラメータ優先順位
 
 パラメータは以下の順序で適用される（後から適用されたものが優先）:
 
@@ -2361,7 +2819,7 @@ ae_config_t ae_get_default_config(void);
 
 ---
 
-#### 4.4.6 ????????????? (???????)
+#### 4.4.8 ????????????? (???????)
 
 ??: ??????????????????????????????????????
 
@@ -2376,6 +2834,18 @@ ae_config_t ae_get_default_config(void);
 | ????? | 1 - 8ch ????????? mono/stereo ???????? |
 | ??? | ???? float32 [-1.0, +1.0] ??? |
 | ??? | ???/??? AE_ERROR_INVALID_PARAM ??????? ae_get_last_error_detail() ??? |
+
+```c
+typedef struct {
+    ae_audio_buffer_t buffer; // interleaved float32
+    uint32_t sample_rate;     // 48kHz ??????
+} ae_audio_data_t;
+
+ae_result_t ae_import_audio_file(ae_engine_t* engine,
+                                const char* path,
+                                ae_audio_data_t* out);
+void ae_free_audio_data(ae_audio_data_t* data);
+```
 
 **??**: ?????????????WAV????????
 
@@ -2856,6 +3326,19 @@ ae_result_t ae_update_biosignal(ae_engine_t* engine,
 | **M/S** | Mid/Side - ステレオ信号の処理方式 |
 | **SOFA** | Spatially Oriented Format for Acoustics - HRTF標準フォーマット |
 | **RT60** | 残響時間 - 60dB減衰にかかる時間 |
+| **EDT** | Early Decay Time - 初期減衰時間 (-10dBまでの時間×6) |
+| **DRR** | Direct-to-Reverberant Ratio - 直接音と残響音のエネルギー比 |
+| **ERB** | Equivalent Rectangular Bandwidth - 等価矩形帯域幅、聴覚フィルタの帯域幅 |
+| **Bark** | 臨界帯域尺度 - 24 Bark = 0-15.5 kHz の知覚的周波数スケール |
+| **LUFS** | Loudness Units Full Scale - EBU R128 ラウドネス測定単位 |
+| **ASW** | Apparent Source Width - 見かけの音源幅、IACC_E と関連 |
+| **LEV** | Listener Envelopment - 聴取者の包囲感、IACC_L と関連 |
+| **IHC** | Inner Hair Cell - 内有毛細胞、蝸牛の感覚細胞 |
+| **AMT** | Auditory Modeling Toolbox - MATLAB/Octave用聴覚モデリングツールボックス |
+| **ITD** | Interaural Time Difference - 両耳間時間差、水平方向の音源定位に寄与 |
+| **ILD** | Interaural Level Difference - 両耳間音圧差、高周波の定位に寄与 |
+| **Sone** | ラウドネスの主観単位 (40 phon = 1 sone) |
+| **Phon** | 等ラウドネスレベル単位 (1kHz純音のdB SPLと等価) |
 
 ---
 
