@@ -1,6 +1,6 @@
 # CMake configuration for Acoustic Engine
 cmake_minimum_required(VERSION 3.16)
-project(acoustic_engine VERSION 0.1.0 LANGUAGES C)
+project(acoustic_engine VERSION 0.2.0 LANGUAGES C)
 
 # C standard
 set(CMAKE_C_STANDARD 11)
@@ -14,6 +14,15 @@ endif()
 # Options
 option(AE_USE_LIBMYSOFA "Enable SOFA HRTF support (libmysofa)" ON)
 option(AE_ENABLE_EXTERNAL_DECODER "Enable external decoder for non-WAV formats" ON)
+option(AE_BUILD_UNITY_PLUGIN "Build Unity plugin" OFF)
+option(AE_BUILD_UE_PLUGIN "Build Unreal Engine plugin" OFF)
+option(AE_BUILD_VST3 "Build VST3 plugin" OFF)
+option(AE_BUILD_AU "Build Audio Unit plugin" OFF)
+
+# Symbol visibility
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_CXX_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN YES)
 
 # Compiler flags
 if(MSVC)
@@ -112,11 +121,12 @@ if(AE_USE_LIBMYSOFA)
 endif()
 
 #==============================================================================
-# Library (placeholder - to be implemented)
+# Main library
 #==============================================================================
 add_library(acoustic_engine SHARED
     src/acoustic_engine.c
     src/ae_audio_io.c
+    src/ae_auditory.c
     src/ae_presets.c
     src/ae_dsp.c
     src/ae_spatial.c
@@ -127,6 +137,12 @@ add_library(acoustic_engine SHARED
     src/ae_slm.c
     src/ae_propagation.c
     src/ae_dynamics.c
+    src/ae_version.c
+    src/ae_deesser.c
+    src/ae_eq.c
+    src/ae_drnl.c
+    src/ae_modfb.c
+    src/ae_perceptual.c
 )
 target_compile_definitions(acoustic_engine PRIVATE AE_BUILD_DLL)
 target_include_directories(acoustic_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)
@@ -172,14 +188,39 @@ endif()
 target_link_libraries(test_analysis acoustic_engine)
 add_test(NAME test_analysis COMMAND test_analysis)
 
+# Test: Auditory modeling
+add_executable(test_auditory tests/test_auditory.c)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(test_auditory m)
+endif()
+target_link_libraries(test_auditory acoustic_engine)
+add_test(NAME test_auditory COMMAND test_auditory)
+
+# Test: Physical propagation models
+add_executable(test_propagation tests/test_propagation.c)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(test_propagation m)
+endif()
+target_link_libraries(test_propagation acoustic_engine)
+add_test(NAME test_propagation COMMAND test_propagation)
+
+# Test: SIMD accuracy verification
+add_executable(test_simd tests/test_simd.c)
+if(UNIX AND NOT APPLE)
+    target_link_libraries(test_simd m)
+endif()
+target_link_libraries(test_simd acoustic_engine)
+add_test(NAME test_simd COMMAND test_simd)
+
 #==============================================================================
 # Custom target: Run all tests
 #==============================================================================
 add_custom_target(run_tests
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-    DEPENDS test_math test_dsp test_analysis
+    DEPENDS test_math test_dsp test_analysis test_auditory test_propagation test_simd
     COMMENT "Running all tests..."
 )
+
 
 #==============================================================================
 # Install (for future use)
