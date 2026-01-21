@@ -1,0 +1,178 @@
+# =============================================================================
+# Acoustic Engine - .gitignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Build outputs
+# -----------------------------------------------------------------------------
+build/
+out/
+cmake-build-*/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.ilk
+*.exp
+*.map
+
+# -----------------------------------------------------------------------------
+# CMake
+# -----------------------------------------------------------------------------
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+_deps/
+CMakeSettings.json
+compile_commands.json
+
+# -----------------------------------------------------------------------------
+# IDE / Editors
+# -----------------------------------------------------------------------------
+# Visual Studio
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+x64/
+x86/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# JetBrains (CLion, etc.)
+.idea/
+*.iml
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim/Neovim
+*.swp
+*.swo
+*~
+tags
+.tags
+
+# Emacs
+*~
+\#*\#
+.emacs.desktop
+.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# -----------------------------------------------------------------------------
+# OS generated files
+# -----------------------------------------------------------------------------
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# -----------------------------------------------------------------------------
+# Dependencies (fetched by CMake)
+# -----------------------------------------------------------------------------
+_deps/
+external/
+third_party/
+
+# -----------------------------------------------------------------------------
+# Testing
+# -----------------------------------------------------------------------------
+Testing/
+CTestTestfile.cmake
+test_output/
+*.log
+coverage/
+*.gcov
+*.gcda
+*.gcno
+lcov.info
+
+# -----------------------------------------------------------------------------
+# Documentation (generated)
+# -----------------------------------------------------------------------------
+docs/html/
+docs/latex/
+doxygen/
+*.dox
+
+# -----------------------------------------------------------------------------
+# Temporary files
+# -----------------------------------------------------------------------------
+*.tmp
+*.temp
+*.bak
+*.backup
+*.orig
+*.rej
+*.patch
+
+# -----------------------------------------------------------------------------
+# HRTF / Audio data (large files)
+# -----------------------------------------------------------------------------
+data/*.sofa
+data/*.wav
+data/*.mp3
+data/*.flac
+!data/.gitkeep
+
+# -----------------------------------------------------------------------------
+# Package managers
+# -----------------------------------------------------------------------------
+node_modules/
+vcpkg_installed/
+
+# -----------------------------------------------------------------------------
+# Python (for any tooling scripts)
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.egg-info/
+.eggs/
+venv/
+.venv/
+ENV/
+env/
